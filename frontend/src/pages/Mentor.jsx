@@ -1,52 +1,89 @@
 import { useState, useEffect, useRef } from 'react';
 import AppHeader from '../components/AppHeader';
-
-function authHeaders() {
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('sh_token')}` };
-}
-
-const INITIAL_MESSAGES = [
-    { from: 'mentor', text: 'Hi 👋 I\'m here to support you. How are you doing today?' },
-    { from: 'user', text: 'I\'m working through my check-in and trying to stay productive.' },
-    { from: 'mentor', text: 'That\'s a positive step. You can use the Skills Hub or talk to your support network whenever you need connection.' },
-];
+import { useAuth } from '../auth/useAuth';
+import { requireSupabase } from '../lib/supabase';
 
 export default function Mentor() {
-    const [messages, setMessages] = useState(INITIAL_MESSAGES);
+    const { user } = useAuth();
+    const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [requests, setRequests] = useState([]);
     const [mentorMsg, setMentorMsg] = useState('');
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
     const chatRef = useRef(null);
 
-    const load = async () => {
+    const load = async (cancelled = () => false) => {
         try {
-            const res = await fetch('/api/mentor', { headers: authHeaders() });
-            if (res.ok) setRequests(await res.json());
-        } catch (_) {}
+            const { data, error } = await requireSupabase().from('mentor_requests')
+                .select('id, message, status, created_at')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            if (!cancelled()) setRequests(data);
+        } catch (err) {
+            if (!cancelled()) setError(err.message || 'Could not load mentor requests.');
+        }
     };
 
-    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        let cancelled = false;
+        const client = requireSupabase();
+        const loadData = async () => {
+            try {
+                const [{ data: requestsData, error: requestsError }, { data: messagesData, error: messagesError }] = await Promise.all([
+                    client.from('mentor_requests').select('id, message, status, created_at')
+                        .eq('user_id', user.id).order('created_at', { ascending: false }),
+                    client.from('mentor_messages').select('id, message, created_at')
+                        .eq('user_id', user.id).order('created_at', { ascending: true }),
+                ]);
+                if (requestsError) throw requestsError;
+                if (messagesError) throw messagesError;
+                if (!cancelled) {
+                    setRequests(requestsData);
+                    setMessages(messagesData);
+                }
+            } catch (loadError) {
+                if (!cancelled) setError(loadError.message || 'Could not load mentor messages.');
+            }
+        };
+        loadData();
+        return () => { cancelled = true; };
+    }, [user.id]);
     useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, [messages]);
 
-    const send = () => {
+    const send = async () => {
         if (!input.trim()) return;
-        setMessages(prev => [...prev, { from: 'user', text: input }]);
-        setInput('');
-        setTimeout(() => {
-            setMessages(prev => [...prev, { from: 'mentor', text: 'Thank you for reaching out. A mentor will respond to your request shortly.' }]);
-        }, 600);
+        setLoading(true);
+        setError('');
+        try {
+            const { error: sendError } = await requireSupabase().from('mentor_messages')
+                .insert({ user_id: user.id, message: input.trim() });
+            if (sendError) throw sendError;
+            setMessages(current => [...current, { id: crypto.randomUUID(), message: input.trim(), created_at: new Date().toISOString() }]);
+            setInput('');
+        } catch (sendError) {
+            setError(sendError.message || 'Could not send your message.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const sendRequest = async () => {
         if (!mentorMsg.trim()) return;
         setLoading(true);
+        setError('');
         try {
-            await fetch('/api/mentor', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ message: mentorMsg }) });
+            const { error } = await requireSupabase().from('mentor_requests')
+                .insert({ user_id: user.id, message: mentorMsg.trim() });
+            if (error) throw error;
             setMentorMsg('');
-            load();
-        } catch (_) {}
-        setLoading(false);
+            await load();
+        } catch (err) {
+            setError(err.message || 'Could not send your mentor request.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -58,18 +95,23 @@ export default function Mentor() {
                 <p className="page-intro">Connect with recovery support.</p>
 
                 <div className="chat" ref={chatRef}>
-                    {messages.map((m, i) => (
-                        <div key={i} className={`bubble${m.from === 'user' ? ' user' : ''}`}>{m.text}</div>
-                    ))}
+                    {messages.length === 0
+                        ? <p className="muted">Send a message to record it for your support team.</p>
+                        : messages.map(message => (
+                            <div key={message.id} className="bubble user">{message.message}</div>
+                        ))}
                 </div>
                 <div className="compose">
                     <input value={input} onChange={e => setInput(e.target.value)} placeholder="Type a message..."
                         onKeyDown={e => e.key === 'Enter' && send()} />
-                    <button className="btn primary" onClick={send}>Send</button>
+                    <button className="btn primary" onClick={send} disabled={loading || !input.trim()}>
+                        {loading ? 'Sending...' : 'Send'}
+                    </button>
                 </div>
 
                 <section className="dashcard" style={{ marginTop: 18 }}>
                     <h3>Request a mentor</h3>
+                    {error && <div className="form-error">{error}</div>}
                     <textarea rows={3} value={mentorMsg} onChange={e => setMentorMsg(e.target.value)}
                         placeholder="What would you like support with?"
                         style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: 10, marginTop: 8, outline: 'none' }} />
@@ -82,7 +124,7 @@ export default function Mentor() {
                             : requests.map(r => (
                                 <div key={r.id} className="post">
                                     <b>{r.status}</b> — {r.message || 'Support requested'}
-                                    <br /><small className="muted">{new Date(r.createdAt).toLocaleString()}</small>
+                                    <br /><small className="muted">{new Date(r.created_at).toLocaleString()}</small>
                                 </div>
                             ))
                         }

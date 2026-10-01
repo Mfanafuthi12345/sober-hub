@@ -1,26 +1,31 @@
 import { useState } from 'react';
 import AppHeader from '../components/AppHeader';
-
-function authHeaders() {
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('sh_token')}` };
-}
+import { useAuth } from '../auth/useAuth';
+import { requireSupabase } from '../lib/supabase';
 
 export default function Emergency() {
+    const { user } = useAuth();
     const [sent, setSent] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
 
     const handlePanic = async () => {
         if (!window.confirm('Send an urgent support request to Sober Hub staff?')) return;
         setLoading(true);
+        setError('');
         try {
-            await fetch('/api/emergency', {
-                method: 'POST',
-                headers: authHeaders(),
-                body: JSON.stringify({ message: 'Urgent support requested via panic button.' }),
+            const { error: requestError } = await requireSupabase().from('support_requests').insert({
+                user_id: user.id,
+                message: 'Urgent support requested via panic button.',
+                priority: 'urgent',
             });
+            if (requestError) throw requestError;
             setSent(true);
-        } catch (_) { setSent(true); }
-        setLoading(false);
+        } catch (err) {
+            setError(err.message || 'Could not send the support request. Please try again or contact local emergency services.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -37,6 +42,7 @@ export default function Emergency() {
                         The Sober-Buddy concept includes a panic button for situations involving cravings or danger.
                         Pressing this button sends an urgent request to the Sober-Hub support desk.
                     </p>
+                    {error && <div className="form-error">{error}</div>}
                     {sent
                         ? <div style={{ background: 'var(--light)', border: '1px solid var(--lg)', borderRadius: 14, padding: '16px 24px', display: 'inline-block', color: 'var(--gd)', fontWeight: 700 }}>
                             ✅ Support request recorded. Staff have been notified.

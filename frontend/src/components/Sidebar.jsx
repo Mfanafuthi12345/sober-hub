@@ -1,13 +1,20 @@
 import { useNavigate, useLocation } from 'react-router-dom';
+import { signOut } from '../auth/useAuth';
+import { useState } from 'react';
 
 export default function Sidebar() {
     const navigate = useNavigate();
     const { pathname } = useLocation();
+    const [error, setError] = useState('');
 
-    const logout = () => {
-        localStorage.removeItem('sh_token');
-        localStorage.removeItem('sh_user');
-        navigate('/login');
+    const logout = async () => {
+        setError('');
+        try {
+            await signOut();
+            navigate('/login');
+        } catch (error) {
+            setError(error.message || 'Could not sign out.');
+        }
     };
 
     const link = (to) => ({
@@ -18,6 +25,7 @@ export default function Sidebar() {
 
     return (
         <aside className="side">
+            {error && <div className="form-error" role="alert">{error}</div>}
             <small>MAIN</small>
             <a {...link('/dashboard')}>🏠 Dashboard</a>
             <a {...link('/profile')}>👤 My Profile</a>

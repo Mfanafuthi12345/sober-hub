@@ -1,7 +1,45 @@
 import AppHeader from '../components/AppHeader';
+import { useEffect, useState } from 'react';
+import { useAuth } from '../auth/useAuth';
+import { requireSupabase } from '../lib/supabase';
+
+const COURSES = [
+    { id: 'cell-phone-repair', title: 'Cell Phone Repair', icon: '📱', description: 'Explore practical repair skills for future work or entrepreneurship.', featured: false },
+    { id: 'barista-training', title: 'Barista Training', icon: '☕', description: 'Develop hospitality-related skills for employment opportunities.', featured: true },
+    { id: 'computer-programming', title: 'Computer & Programming', icon: '💻', description: 'Build basic computer skills or explore programming fundamentals.', featured: false },
+];
 
 export default function Skills() {
-    const toast = (msg) => alert(msg);
+    const { user } = useAuth();
+    const [started, setStarted] = useState([]);
+    const [error, setError] = useState('');
+    const [loadingCourse, setLoadingCourse] = useState('');
+
+    useEffect(() => {
+        let cancelled = false;
+        requireSupabase().from('course_progress').select('course').eq('user_id', user.id)
+            .then(({ data, error: loadError }) => {
+                if (loadError) throw loadError;
+                if (!cancelled) setStarted(data.map(row => row.course));
+            })
+            .catch(loadError => { if (!cancelled) setError(loadError.message || 'Could not load course progress.'); });
+        return () => { cancelled = true; };
+    }, [user.id]);
+
+    const startCourse = async (course) => {
+        setLoadingCourse(course);
+        setError('');
+        try {
+            const { error: saveError } = await requireSupabase().from('course_progress')
+                .upsert({ user_id: user.id, course, status: 'started' }, { onConflict: 'user_id,course' });
+            if (saveError) throw saveError;
+            setStarted(current => current.includes(course) ? current : [...current, course]);
+        } catch (saveError) {
+            setError(saveError.message || 'Could not save course progress.');
+        } finally {
+            setLoadingCourse('');
+        }
+    };
 
     return (
         <>
@@ -11,25 +49,19 @@ export default function Skills() {
                 <h1>Learn. Build. Grow.</h1>
                 <p className="page-intro">Vocational training to help young people improve employability and build a productive future.</p>
 
+                {error && <div className="form-error">{error}</div>}
                 <div className="grid three">
-                    <article className="card">
-                        <i>📱</i>
-                        <h3>Cell Phone Repair</h3>
-                        <p>Explore practical repair skills for future work or entrepreneurship.</p>
-                        <button className="btn outline" style={{ marginTop: 16 }} onClick={() => toast('Cell phone repair module coming soon.')}>Start Module</button>
-                    </article>
-                    <article className="card featured">
-                        <i>☕</i>
-                        <h3>Barista Training</h3>
-                        <p>Develop hospitality-related skills for employment opportunities.</p>
-                        <button className="btn primary" style={{ marginTop: 16 }} onClick={() => toast('Barista training module coming soon.')}>Start Module</button>
-                    </article>
-                    <article className="card">
-                        <i>💻</i>
-                        <h3>Computer & Programming</h3>
-                        <p>Build basic computer skills or explore programming fundamentals.</p>
-                        <button className="btn outline" style={{ marginTop: 16 }} onClick={() => toast('Computer skills module coming soon.')}>Start Module</button>
-                    </article>
+                    {COURSES.map(course => (
+                        <article key={course.id} className={`card${course.featured ? ' featured' : ''}`}>
+                            <i>{course.icon}</i>
+                            <h3>{course.title}</h3>
+                            <p>{course.description}</p>
+                            <button className={`btn ${course.featured ? 'primary' : 'outline'}`} style={{ marginTop: 16 }}
+                                onClick={() => startCourse(course.id)} disabled={loadingCourse === course.id}>
+                                {loadingCourse === course.id ? 'Saving...' : started.includes(course.id) ? 'In Progress' : 'Start Module'}
+                            </button>
+                        </article>
+                    ))}
                 </div>
 
                 <section className="dashcard" style={{ marginTop: 18 }}>
