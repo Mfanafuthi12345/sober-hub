@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import AppHeader from '../components/AppHeader';
+import { useAuth } from '../auth/useAuth';
+import { requireSupabase } from '../lib/supabase';
 
 const MOODS = [
     { value: 'Great', emoji: '😊' },
@@ -8,31 +10,57 @@ const MOODS = [
     { value: 'Struggling', emoji: '😔' },
 ];
 
-function authHeaders() {
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('sh_token')}` };
-}
-
 export default function CheckIn() {
+    const { user } = useAuth();
     const [mood, setMood] = useState('');
     const [note, setNote] = useState('');
     const [checkins, setCheckins] = useState([]);
     const [msg, setMsg] = useState('');
 
-    const load = async () => {
+    const load = async (cancelled = () => false) => {
         try {
-            const res = await fetch('/api/checkins', { headers: authHeaders() });
-            if (res.ok) setCheckins(await res.json());
-        } catch (_) {}
+            const client = requireSupabase();
+            const { data, error } = await client.from('checkins')
+                .select('id, mood, note, created_at')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(20);
+            if (error) throw error;
+            if (!cancelled()) setCheckins(data);
+        } catch (err) {
+            if (!cancelled()) setMsg(err.message || 'Could not load recent check-ins.');
+        }
     };
 
-    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        let cancelled = false;
+        requireSupabase().from('checkins')
+            .select('id, mood, note, created_at')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(20)
+            .then(({ data, error }) => {
+                if (error) throw error;
+                if (!cancelled) setCheckins(data);
+            })
+            .catch(error => { if (!cancelled) setMsg(error.message || 'Could not load recent check-ins.'); });
+        return () => { cancelled = true; };
+    }, [user.id]);
 
     const save = async () => {
         if (!mood) return setMsg('Please select how you are feeling.');
         try {
-            const res = await fetch('/api/checkins', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ mood, note }) });
-            if (res.ok) { setMsg('Check-in saved! 💚'); setNote(''); setMood(''); load(); }
-        } catch (_) { setMsg('Failed to save check-in.'); }
+            const { error } = await requireSupabase().from('checkins').insert({
+                user_id: user.id,
+                mood,
+                note: note.trim() || null,
+            });
+            if (error) throw error;
+            setMsg('Check-in saved! 💚');
+            setNote('');
+            setMood('');
+            await load();
+        } catch (err) { setMsg(err.message || 'Failed to save check-in.'); }
     };
 
     return (
@@ -67,7 +95,7 @@ export default function CheckIn() {
                         : checkins.slice(0, 5).map(c => (
                             <div key={c.id} className="post">
                                 <b>{c.mood}</b> — {c.note || 'No note added'}
-                                <br /><small style={{ color: 'var(--muted)' }}>{new Date(c.createdAt).toLocaleString()}</small>
+                                <br /><small style={{ color: 'var(--muted)' }}>{new Date(c.created_at).toLocaleString()}</small>
                             </div>
                         ))
                     }

@@ -1,6 +1,7 @@
 package za.ac.cput.soberhub.domain;
 
 import jakarta.persistence.*;
+import java.time.Instant;
 
 @Entity
 @Table(name = "users")
@@ -32,6 +33,14 @@ public class User {
 
     private String membershipPlan;
 
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean emailVerified;
+
+    @Column(unique = true, length = 64)
+    private String verificationTokenHash;
+
+    private Instant verificationTokenExpiresAt;
+
     public User() {}
 
     public Long getId() { return id; }
@@ -51,4 +60,10 @@ public class User {
     public void setMembershipStatus(String membershipStatus) { this.membershipStatus = membershipStatus; }
     public String getMembershipPlan() { return membershipPlan; }
     public void setMembershipPlan(String membershipPlan) { this.membershipPlan = membershipPlan; }
+    public boolean isEmailVerified() { return emailVerified; }
+    public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
+    public String getVerificationTokenHash() { return verificationTokenHash; }
+    public void setVerificationTokenHash(String verificationTokenHash) { this.verificationTokenHash = verificationTokenHash; }
+    public Instant getVerificationTokenExpiresAt() { return verificationTokenExpiresAt; }
+    public void setVerificationTokenExpiresAt(Instant verificationTokenExpiresAt) { this.verificationTokenExpiresAt = verificationTokenExpiresAt; }
 }

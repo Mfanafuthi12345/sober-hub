@@ -1,9 +1,33 @@
 import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import Sidebar from '../components/Sidebar';
+import { useAuth } from '../auth/useAuth';
+import { requireSupabase } from '../lib/supabase';
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const user = JSON.parse(localStorage.getItem('sh_user') || '{}');
+    const { user: authUser } = useAuth();
+    const [profile, setProfile] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        const loadProfile = async () => {
+            try {
+                const { data, error } = await requireSupabase().from('profiles')
+                    .select('first_name, membership_status')
+                    .eq('id', authUser.id)
+                    .single();
+                if (error) throw error;
+                if (!cancelled) setProfile(data);
+            } catch (error) {
+                console.error('Could not load dashboard profile:', error.message);
+            }
+        };
+        loadProfile();
+        return () => { cancelled = true; };
+    }, [authUser.id]);
+    const firstName = profile?.first_name || authUser.user_metadata?.first_name || 'Member';
+    const isMemberActive = profile?.membership_status === 'active';
 
     return (
         <>
@@ -16,10 +40,10 @@ export default function Dashboard() {
             <div className="app-layout">
                 <Sidebar />
                 <main className="main">
-                    <div className="welcome" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
+                    <div className="welcome dashboard-welcome" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
                         <div>
                             <span className="eyebrow">MEMBER DASHBOARD</span>
-                            <h1 style={{ fontSize: 32 }}>Welcome back, {user.firstName || 'Member'} 👋</h1>
+                            <h1 style={{ fontSize: 32 }}>Welcome back, {firstName} 👋</h1>
                             <p className="muted">Small steps every day can build a stronger future.</p>
                         </div>
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -37,7 +61,7 @@ export default function Dashboard() {
                         <a href="#" onClick={e => { e.preventDefault(); navigate('/mentor'); }}>Talk to a mentor →</a>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 18, marginBottom: 30 }}>
+                    <div className="dashboard-overview" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 18, marginBottom: 30 }}>
                         <section className="dashcard">
                             <h3>Recovery Journey</h3>
                             <div style={{ width: 130, height: 130, borderRadius: '50%', margin: 'auto', background: 'conic-gradient(var(--g) 0 72%,#E2ECE4 72%)', display: 'grid', placeItems: 'center' }}>
@@ -68,11 +92,11 @@ export default function Dashboard() {
 
                         <section className="dashcard">
                             <h3>Membership</h3>
-                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 999, background: user.membershipStatus === 'active' ? 'var(--light)' : '#fff3e0', color: user.membershipStatus === 'active' ? 'var(--gd)' : '#e65100', fontSize: 12, fontWeight: 700 }}>
-                                {user.membershipStatus === 'active' ? 'Active' : 'Inactive'}
+                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 999, background: isMemberActive ? 'var(--light)' : '#fff3e0', color: isMemberActive ? 'var(--gd)' : '#e65100', fontSize: 12, fontWeight: 700 }}>
+                                {isMemberActive ? 'Active' : 'Inactive'}
                             </span>
                             <p className="muted" style={{ marginTop: 12 }}>✓ Wi-Fi &nbsp; ✓ Gaming &nbsp; ✓ Mini gym &nbsp; ✓ Peer support</p>
-                            {user.membershipStatus !== 'active' && (
+                            {!isMemberActive && (
                                 <button className="btn primary" style={{ marginTop: 14, width: '100%' }} onClick={() => navigate('/payment')}>Activate Membership</button>
                             )}
                         </section>
@@ -81,7 +105,7 @@ export default function Dashboard() {
                     <div style={{ marginTop: 30 }}>
                         <span className="eyebrow">QUICK ACCESS</span>
                         <h2 style={{ fontSize: 24, margin: '8px 0 18px' }}>What do you need today?</h2>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
+                        <div className="quick-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
                             {[
                                 { icon: '💚', title: 'Daily Check-in', sub: 'Record how you\'re doing.', to: '/checkin' },
                                 { icon: '👥', title: 'Community', sub: 'Positive connection.', to: '/community' },

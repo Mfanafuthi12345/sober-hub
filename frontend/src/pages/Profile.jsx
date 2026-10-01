@@ -1,21 +1,36 @@
 import { useState, useEffect } from 'react';
 import AppHeader from '../components/AppHeader';
-
-function authHeaders() {
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('sh_token')}` };
-}
+import { useAuth } from '../auth/useAuth';
+import { requireSupabase } from '../lib/supabase';
 
 export default function Profile() {
+    const { user } = useAuth();
     const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '' });
     const [msg, setMsg] = useState('');
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        fetch('/api/profile', { headers: authHeaders() })
-            .then(r => r.json())
-            .then(d => setForm({ firstName: d.firstName, lastName: d.lastName, email: d.email, phone: d.phone || '' }))
-            .catch(() => {});
-    }, []);
+        let cancelled = false;
+        const loadProfile = async () => {
+            try {
+                const { data, error } = await requireSupabase().from('profiles')
+                    .select('first_name, last_name, phone')
+                    .eq('id', user.id)
+                    .single();
+                if (error) throw error;
+                if (!cancelled) setForm({
+                    firstName: data.first_name || '',
+                    lastName: data.last_name || '',
+                    email: user.email || '',
+                    phone: data.phone || '',
+                });
+            } catch (err) {
+                if (!cancelled) setMsg(err.message || 'Could not load your profile.');
+            }
+        };
+        loadProfile();
+        return () => { cancelled = true; };
+    }, [user.id, user.email]);
 
     const set = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
@@ -23,18 +38,27 @@ export default function Profile() {
         setLoading(true);
         setMsg('');
         try {
-            const res = await fetch('/api/profile', {
-                method: 'PUT',
-                headers: authHeaders(),
-                body: JSON.stringify({ firstName: form.firstName, lastName: form.lastName, phone: form.phone }),
+            const client = requireSupabase();
+            const { error } = await client.from('profiles').update({
+                first_name: form.firstName.trim(),
+                last_name: form.lastName.trim(),
+                phone: form.phone.trim() || null,
+            }).eq('id', user.id);
+            if (error) throw error;
+            const { error: metadataError } = await client.auth.updateUser({
+                data: {
+                    first_name: form.firstName.trim(),
+                    last_name: form.lastName.trim(),
+                    phone: form.phone.trim(),
+                },
             });
-            if (res.ok) {
-                setMsg('Profile updated successfully.');
-                const stored = JSON.parse(localStorage.getItem('sh_user') || '{}');
-                localStorage.setItem('sh_user', JSON.stringify({ ...stored, firstName: form.firstName, lastName: form.lastName }));
-            }
-        } catch (_) { setMsg('Failed to update profile.'); }
-        setLoading(false);
+            if (metadataError) throw metadataError;
+            setMsg('Profile updated successfully.');
+        } catch (err) {
+            setMsg(err.message || 'Failed to update profile.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
